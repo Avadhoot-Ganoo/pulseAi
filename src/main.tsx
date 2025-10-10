@@ -13,9 +13,11 @@ root.render(isDev ? (
   <App />
 ))
 
-// Register Service Worker for offline use
+// Disable Service Worker to avoid stale caches in production diagnostics
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js').catch(() => {})
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+      regs.forEach((r) => r.unregister())
+    }).catch(() => {})
   })
 }

@@ -14,6 +14,7 @@ export default function OverlayPPG({
   useEffect(() => {
     const canvas = canvasRef.current!
     const ctx = canvas.getContext('2d')!
+    console.log('overlay drawLoop started')
     function draw() {
       if (!canvas || !landmarks) {
         requestAnimationFrame(draw)
@@ -101,7 +102,7 @@ export default function OverlayPPG({
     draw()
   }, [landmarks, liveHR, liveAmp, sqi, progress])
 
-  return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
+  return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none z-[9999]" />
 }
 
 // small helpers

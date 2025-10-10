@@ -58,6 +58,9 @@ function stabilize(prev: ROI | null, next: ROI, sAlpha = 0.7): ROI {
 
 let prevROIs: { forehead: ROI; leftCheek: ROI; rightCheek: ROI; nose: ROI } | null = null
 
+// Signal readiness to main thread
+try { postMessage({ type: 'worker-ready', worker: 'face' }) } catch {}
+
 onmessage = (ev) => {
   const { type, landmarks, vw, vh, cfg } = ev.data || {}
   if (cfg) {

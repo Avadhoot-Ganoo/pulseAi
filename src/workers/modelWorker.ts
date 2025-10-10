@@ -14,23 +14,35 @@ type AnyMsg = InitMsg | InferSpo2Msg | InferBpMsg | DenoiseMsg
 async function ensureModels() {
   if (!spo2Session) {
     try {
-      spo2Session = await ort.InferenceSession.create('/models/spo2_model.onnx', { executionProviders: ['webgpu', 'webgl', 'wasm'] })
-    } catch {
+      const modelUrl = new URL('/models/spo2_model.onnx', import.meta.url).toString()
+      console.log('loading model', modelUrl)
+      spo2Session = await ort.InferenceSession.create(modelUrl, { executionProviders: ['webgpu', 'webgl', 'wasm'] })
+    } catch (e) {
       // leave null; main thread may apply heuristics
+      console.error('spo2 model failed to load', e)
+      postMessage({ type: 'model_error', model: 'spo2', error: String(e) })
     }
   }
   if (!bpSession) {
     try {
-      bpSession = await ort.InferenceSession.create('/models/bp_model.onnx', { executionProviders: ['webgpu', 'webgl', 'wasm'] })
-    } catch {
+      const modelUrl = new URL('/models/bp_model.onnx', import.meta.url).toString()
+      console.log('loading model', modelUrl)
+      bpSession = await ort.InferenceSession.create(modelUrl, { executionProviders: ['webgpu', 'webgl', 'wasm'] })
+    } catch (e) {
       // leave null
+      console.error('bp model failed to load', e)
+      postMessage({ type: 'model_error', model: 'bp', error: String(e) })
     }
   }
   if (!denoiseSession) {
     try {
-      denoiseSession = await ort.InferenceSession.create('/models/denoiser.onnx', { executionProviders: ['webgpu', 'webgl', 'wasm'] })
-    } catch {
+      const modelUrl = new URL('/models/denoiser.onnx', import.meta.url).toString()
+      console.log('loading model', modelUrl)
+      denoiseSession = await ort.InferenceSession.create(modelUrl, { executionProviders: ['webgpu', 'webgl', 'wasm'] })
+    } catch (e) {
       // leave null
+      console.error('denoiser model failed to load', e)
+      postMessage({ type: 'model_error', model: 'denoiser', error: String(e) })
     }
   }
 }
@@ -39,6 +51,7 @@ onmessage = async (ev: MessageEvent<AnyMsg>) => {
   const msg = ev.data
   if (msg.type === 'init') {
     await ensureModels()
+    try { postMessage({ type: 'worker-ready', worker: 'model' }) } catch {}
     postMessage({ type: 'ready', spo2: !!spo2Session, bp: !!bpSession, denoiser: !!denoiseSession })
     return
   }

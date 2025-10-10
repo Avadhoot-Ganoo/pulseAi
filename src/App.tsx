@@ -40,6 +40,7 @@ export default function App() {
     sqi,
     perfStats,
     waveform,
+    modelError,
   } = useRPPG({ videoRef, landmarks, rois, motionOK })
   const { applyOffsets } = useCalibration()
 
@@ -84,6 +85,11 @@ export default function App() {
         <div className="max-w-4xl mx-auto glass rounded-2xl p-4">
           <div className="relative rounded-xl overflow-hidden">
             <CameraFeed ref={videoRef} active={phase !== 'idle'} />
+            {modelError && (
+              <div className="absolute top-2 left-2 z-[9999] bg-red-600/80 text-white text-xs px-3 py-2 rounded">
+                Model failed to load — check console/network: {modelError}
+              </div>
+            )}
 
             {phase === 'measuring' && (
               <>
@@ -110,6 +116,8 @@ export default function App() {
                 <div className="absolute bottom-4 right-4">
                   <PerfStats stats={perfStats} />
                 </div>
+                {/* Debug text to ensure overlay updates render */}
+                <div className="absolute bottom-2 left-2 text-white/80 text-xs z-[9999]">Overlay active</div>
               </>
             )}
           </div>

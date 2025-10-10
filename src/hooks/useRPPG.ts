@@ -40,6 +40,7 @@ export default function useRPPG({
   const lastRGB = useRef<{ forehead: number[]; leftCheek: number[]; rightCheek: number[] } | null>(null)
   const [waveform, setWaveform] = useState<Float32Array | null>(null)
   const prevROIs = useRef<{ forehead: { x: number; y: number; w: number; h: number }; leftCheek: { x: number; y: number; w: number; h: number }; rightCheek: { x: number; y: number; w: number; h: number } } | null>(null)
+  const [modelError, setModelError] = useState<string | null>(null)
 
   useEffect(() => {
     // create an offscreen canvas
@@ -51,6 +52,8 @@ export default function useRPPG({
       type: 'module',
     })
     workerRef.current = worker
+    ;(window as any).__rppgWorker = worker
+    console.log('spawned rppg worker')
 
     // Lazy model worker
     const mWorker = new Worker(new URL('../workers/modelWorker.ts', import.meta.url), { type: 'module' })
@@ -59,6 +62,11 @@ export default function useRPPG({
 
     mWorker.onmessage = (ev) => {
       const data = ev.data
+      console.log('worker->main modelWorker', data)
+      if (data.type === 'model_error') {
+        console.error('Model failed to load — check console/network', data)
+        setModelError(`${data.model}: ${data.error}`)
+      }
       if (data.type === 'spo2' && data.value !== null) {
         setMetrics((prev) => ({ ...prev, spo2: data.value }))
       }
@@ -72,6 +80,7 @@ export default function useRPPG({
 
     worker.onmessage = (ev) => {
       const data = ev.data
+      console.log('worker->main rppgWorker', data)
       if (data.type === 'update') {
         setHr(data.hr ?? null)
         setHrv(data.hrv ?? null)
@@ -226,6 +235,7 @@ export default function useRPPG({
     setRunning(true)
     loadModels().catch(() => {})
     workerRef.current?.postMessage({ type: 'start' })
+    console.log('worker-ready', !!workerRef.current)
     requestAnimationFrame(loop)
   }, [loop, running])
 
@@ -251,6 +261,7 @@ export default function useRPPG({
       .catch(() => {
         // heuristics applied in models.ts; already handled
       })
+    console.log('final result', { hr, hrv, metrics })
   }, [])
 
   return {
@@ -264,5 +275,6 @@ export default function useRPPG({
     sqi,
     perfStats,
     waveform,
+    modelError,
   }
 }

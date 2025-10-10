@@ -41,8 +41,27 @@ const CameraFeed = forwardRef<HTMLVideoElement, Props>(({ active = false }, ref)
         }
         if (!mounted) return
         if (videoRef.current) {
+          console.log('camera stream', stream)
           videoRef.current.srcObject = stream
-          await videoRef.current.play()
+          videoRef.current.playsInline = true
+          videoRef.current.muted = true
+          await videoRef.current.play().then(() => {
+            console.log('video.play succeeded')
+          }).catch((e) => {
+            console.error('video.play failed', e)
+          })
+          console.log('camera ready', (videoRef.current as any).srcObject)
+          // Diagnostic frame loop ping to worker
+          const v = videoRef.current
+          const hasRVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype
+          if (hasRVFC) {
+            ;(v as any).requestVideoFrameCallback(function cb() {
+              try { workerPing() } catch {}
+              (v as any).requestVideoFrameCallback(cb)
+            })
+          } else {
+            setInterval(() => { try { workerPing() } catch {} }, 500)
+          }
         }
       } catch (e) {
         console.error('Camera permission or init error', e)
@@ -71,3 +90,10 @@ const CameraFeed = forwardRef<HTMLVideoElement, Props>(({ active = false }, ref)
 })
 
 export default CameraFeed
+
+// Diagnostic: ping rPPG worker if available
+function workerPing() {
+  try {
+    ;(window as any).__rppgWorker?.postMessage({ type: 'ping', ts: performance.now() })
+  } catch {}
+}

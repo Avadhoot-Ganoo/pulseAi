@@ -42,6 +42,7 @@ export default function useFaceMesh({
           runningMode: 'VIDEO',
           numFaces: 1,
         })
+        console.log('facemesh ready', true)
       } catch (e) {
         console.warn('Failed to initialize FaceLandmarker', e)
         return
@@ -108,6 +109,7 @@ export default function useFaceMesh({
     faceWorkerRef.current = fWorker
     fWorker.onmessage = (ev) => {
       const data = ev.data
+      console.log('worker->main faceWorker', data)
       if (data.type === 'rois') {
         setROIs(data.rois)
         setMotionOK(data.motionOK)

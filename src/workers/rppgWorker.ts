@@ -26,6 +26,9 @@ let running = false
 let kalmanHR: SimpleKalman | null = null
 let lastPeakCount = 0
 
+// Signal readiness to main thread
+try { postMessage({ type: 'worker-ready', worker: 'rppg' }) } catch {}
+
 function detrend(signal: number[]): number[] {
   // remove mean
   const mean = signal.reduce((a, b) => a + b, 0) / Math.max(signal.length, 1)
@@ -136,8 +139,12 @@ function process() {
 
 // Removed unused combineRGB; CHROM/POS are handled in utilities and can be integrated later
 
-onmessage = (ev: MessageEvent<FrameMsg | ControlMsg>) => {
+onmessage = (ev: MessageEvent<FrameMsg | ControlMsg | { type: 'ping'; ts: number }>) => {
   const msg = ev.data
+  if ((msg as any).type === 'ping') {
+    postMessage({ type: 'sample', worker: 'rppg', ts: (msg as any).ts })
+    return
+  }
   if (msg.type === 'start') {
     running = true
     fSeries.length = 0
