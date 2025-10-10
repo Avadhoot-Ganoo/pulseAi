@@ -3,11 +3,15 @@ import { createRoot } from 'react-dom/client'
 import './tailwind.css'
 import App from './App.tsx'
 
-createRoot(document.getElementById('root')!).render(
+const root = createRoot(document.getElementById('root')!)
+const isDev = import.meta.env.DEV
+root.render(isDev ? (
   <StrictMode>
     <App />
-  </StrictMode>,
-)
+  </StrictMode>
+) : (
+  <App />
+))
 
 // Register Service Worker for offline use
 if ('serviceWorker' in navigator) {
