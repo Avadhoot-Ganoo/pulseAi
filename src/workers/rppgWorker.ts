@@ -154,5 +154,13 @@ onmessage = (ev: MessageEvent<FrameMsg | ControlMsg>) => {
   const res = process()
   if (res) {
     postMessage({ type: 'update', ...res })
+    // Send a short denoised waveform window for AR overlay
+    const wfLen = Math.min(128, res.signal.length)
+    if (wfLen > 0) {
+      const slice = res.signal.slice(-wfLen)
+      const wf = new Float32Array(slice)
+      // Transfer buffer to avoid copy overhead
+      postMessage({ type: 'waveform', data: wf }, [wf.buffer])
+    }
   }
 }

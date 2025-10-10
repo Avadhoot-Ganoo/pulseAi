@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadModels, inferSpo2, inferBP } from '../utils/models'
 import { featureColorRatio, spo2FeatureVector, bpFeatureVector } from '../utils/features'
+import { roisFromLandmarks, stabilizeROI } from '../utils/roi'
 
 type Landmarks = Array<{ x: number; y: number; z: number }>
 
@@ -30,6 +31,8 @@ export default function useRPPG({
   const [sqi, setSqi] = useState<{ snr: number; rois?: { forehead: number; leftCheek: number; rightCheek: number } } | null>(null)
   const [running, setRunning] = useState(false)
   const lastRGB = useRef<{ forehead: number[]; leftCheek: number[]; rightCheek: number[] } | null>(null)
+  const [waveform, setWaveform] = useState<Float32Array | null>(null)
+  const prevROIs = useRef<{ forehead: { x: number; y: number; w: number; h: number }; leftCheek: { x: number; y: number; w: number; h: number }; rightCheek: { x: number; y: number; w: number; h: number } } | null>(null)
 
   useEffect(() => {
     // create an offscreen canvas
@@ -66,6 +69,9 @@ export default function useRPPG({
         if (Array.isArray(data.signal)) setSignal(data.signal)
         if (data.metrics) setMetrics(data.metrics)
         if (data.sqi) setSqi(data.sqi)
+      }
+      if (data.type === 'waveform' && data.data instanceof Float32Array) {
+        setWaveform(data.data)
       }
     }
 
@@ -114,40 +120,17 @@ export default function useRPPG({
       return { forehead, leftCheek, rightCheek }
     }
 
-    // derive rectangles from face bounding box if landmarks provided
+    // derive ROIs from landmarks
     if (!landmarks) return null
-    const xs = landmarks.map((p) => p.x)
-    const ys = landmarks.map((p) => p.y)
-    const xMin = Math.min(...xs)
-    const xMax = Math.max(...xs)
-    const yMin = Math.min(...ys)
-    const yMax = Math.max(...ys)
-    const box = {
-      x: xMin * video.videoWidth,
-      y: yMin * video.videoHeight,
-      width: (xMax - xMin) * video.videoWidth,
-      height: (yMax - yMin) * video.videoHeight,
+    const rois = roisFromLandmarks(landmarks, video.videoWidth, video.videoHeight)
+    if (!rois) return null
+    const stab = {
+      forehead: stabilizeROI(prevROIs.current?.forehead || null, rois.forehead, 0.7),
+      leftCheek: stabilizeROI(prevROIs.current?.leftCheek || null, rois.leftCheek, 0.7),
+      rightCheek: stabilizeROI(prevROIs.current?.rightCheek || null, rois.rightCheek, 0.7),
     }
-
-    const forehead = {
-      x: box.x + box.width * 0.25,
-      y: box.y + box.height * 0.1,
-      w: box.width * 0.5,
-      h: box.height * 0.15,
-    }
-    const leftCheek = {
-      x: box.x + box.width * 0.1,
-      y: box.y + box.height * 0.45,
-      w: box.width * 0.25,
-      h: box.height * 0.18,
-    }
-    const rightCheek = {
-      x: box.x + box.width * 0.65,
-      y: box.y + box.height * 0.45,
-      w: box.width * 0.25,
-      h: box.height * 0.18,
-    }
-    return { forehead, leftCheek, rightCheek }
+    prevROIs.current = stab
+    return stab
   }, [videoRef, landmarks])
 
   const sampleROI = useCallback(
@@ -241,5 +224,6 @@ export default function useRPPG({
     metrics,
     sqi,
     perfStats,
+    waveform,
   }
 }

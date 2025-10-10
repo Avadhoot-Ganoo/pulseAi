@@ -15,6 +15,8 @@ import useRPPG from './hooks/useRPPG'
 import useCalibration from './hooks/useCalibration'
 import ThreeOverlay from './components/ThreeOverlay'
 import PerfStats from './components/PerfStats'
+import OverlayPPG from './components/OverlayPPG'
+import OverlayResults from './components/OverlayResults'
 
 type Phase = 'idle' | 'measuring' | 'done'
 
@@ -75,6 +77,14 @@ export default function App() {
               <>
                 <OverlayPulseRing faceBox={faceBox} hr={applyOffsets(hr).hr} />
                 <ThreeOverlay hr={applyOffsets(hr).hr} />
+                <OverlayPPG
+                  landmarks={landmarks}
+                  liveHR={applyOffsets(hr).hr}
+                  liveAmp={Math.min(1, Math.abs(signal[signal.length - 1] || 0))}
+                  sqi={sqi ? Math.max(0, Math.min(1, (sqi.snr || 0) / 20)) : 0.5}
+                  progress={(30 - secondsLeft) / 30}
+                  waveform={waveform}
+                />
                 <div className="absolute top-4 left-4">
                   <StabilityMeter value={Math.round(stability * 100)} />
                 </div>
@@ -102,6 +112,17 @@ export default function App() {
               exit={{ opacity: 0, y: -20 }}
               className="max-w-4xl mx-auto mt-8"
             >
+              {/* Show results on the overlay near the face */}
+              <div className="relative rounded-xl overflow-hidden">
+                <CameraFeed ref={videoRef} active={true} />
+                <OverlayResults
+                  landmarks={landmarks}
+                  hr={applyOffsets(hr, metrics.spo2, metrics.bp).hr}
+                  spo2={applyOffsets(hr, metrics.spo2, metrics.bp).spo2}
+                  bp={applyOffsets(hr, metrics.spo2, metrics.bp).bp}
+                  confidence={confidence}
+                />
+              </div>
               <ResultDashboard
                 hr={applyOffsets(hr, metrics.spo2, metrics.bp).hr}
                 hrv={hrv}
