@@ -10,12 +10,19 @@ type Metrics = {
   bp?: { systolic: number; diastolic: number }
 }
 
+type ROI = { x: number; y: number; w: number; h: number }
+type ROISet = { forehead: ROI; leftCheek: ROI; rightCheek: ROI }
+
 export default function useRPPG({
   videoRef,
   landmarks,
+  rois: roisArg,
+  motionOK,
 }: {
   videoRef: React.MutableRefObject<HTMLVideoElement | null>
   landmarks: Landmarks | null
+  rois?: ROISet | null
+  motionOK?: boolean
 }) {
   const workerRef = useRef<Worker | null>(null)
   const modelWorkerRef = useRef<Worker | null>(null)
@@ -58,6 +65,9 @@ export default function useRPPG({
       if (data.type === 'bp' && data.value !== null) {
         setMetrics((prev) => ({ ...prev, bp: data.value }))
       }
+      if (data.type === 'denoised' && data.data instanceof Float32Array) {
+        setWaveform(data.data)
+      }
     }
 
     worker.onmessage = (ev) => {
@@ -71,7 +81,17 @@ export default function useRPPG({
         if (data.sqi) setSqi(data.sqi)
       }
       if (data.type === 'waveform' && data.data instanceof Float32Array) {
-        setWaveform(data.data)
+        // send to denoiser if available; falls back to echo in worker
+        try {
+          modelWorkerRef.current?.postMessage({ type: 'denoise', data: data.data }, [data.data.buffer])
+        } catch {
+          setWaveform(data.data)
+        }
+      }
+      if (data.type === 'beat') {
+        try {
+          if (typeof navigator !== 'undefined' && 'vibrate' in navigator) (navigator as any).vibrate(10)
+        } catch {}
       }
     }
 
@@ -94,6 +114,12 @@ export default function useRPPG({
     const video = videoRef.current
     const demo = new URLSearchParams(window.location.search).get('demo') === '1'
     if (!video) return null
+
+    // If stabilized ROIs are provided from face worker, prefer them
+    if (roisArg && roisArg.forehead && roisArg.leftCheek && roisArg.rightCheek) {
+      prevROIs.current = roisArg
+      return roisArg
+    }
 
     // Demo mode: fixed ROIs when landmarks are unavailable
     if (!landmarks && demo) {
@@ -131,7 +157,7 @@ export default function useRPPG({
     }
     prevROIs.current = stab
     return stab
-  }, [videoRef, landmarks])
+  }, [videoRef, landmarks, roisArg])
 
   const sampleROI = useCallback(
     (rect: { x: number; y: number; w: number; h: number }) => {
@@ -140,6 +166,13 @@ export default function useRPPG({
       if (!video || !canvas) return [0, 0, 0]
       const ctx = canvas.getContext('2d')
       if (!ctx) return [0, 0, 0]
+      // Ensure canvas matches current video dimensions to align ROI coordinates
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth
+          canvas.height = video.videoHeight
+        }
+      }
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       const img = ctx.getImageData(rect.x, rect.y, rect.w, rect.h)
       const data = img.data
@@ -165,6 +198,12 @@ export default function useRPPG({
       telemetryWorkerRef.current?.postMessage({ type: 'perf', name: 'frame', dt })
     }
     lastFrameTs.current = now
+    if (motionOK === false) {
+      // skip sampling when motion exceeds threshold
+      telemetryWorkerRef.current?.postMessage({ type: 'perf', name: 'frame_drop', dt: 0 })
+      requestAnimationFrame(loop)
+      return
+    }
     const rois = computeROIs()
     if (rois) {
       const f = sampleROI(rois.forehead)
@@ -180,7 +219,7 @@ export default function useRPPG({
       })
     }
     requestAnimationFrame(loop)
-  }, [computeROIs, sampleROI, running])
+  }, [computeROIs, sampleROI, running, motionOK])
 
   const startMeasurement = useCallback(() => {
     if (running) return

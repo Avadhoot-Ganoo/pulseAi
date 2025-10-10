@@ -14,6 +14,7 @@ type ControlMsg = { type: 'start' } | { type: 'stop' }
 import { SimpleKalman } from '../utils/kalman'
 import { hampelFilter, snrPulse } from '../utils/filters'
 import { computeHRVMetrics } from '../utils/hrv'
+import { autocorrStrength, beatRegularity, sqiScore } from '../utils/sqi'
 import { dominantFrequencyInBand } from '../utils/fft'
 
 // Maintain per-ROI green channel series to enable weighted fusion by SNR
@@ -23,6 +24,7 @@ const rSeries: number[] = []
 const timestamps: number[] = []
 let running = false
 let kalmanHR: SimpleKalman | null = null
+let lastPeakCount = 0
 
 function detrend(signal: number[]): number[] {
   // remove mean
@@ -111,7 +113,7 @@ function process() {
   // Outlier rejection
   const clean = hampelFilter(bp)
   // Peak detection for HRV
-  const { ibis } = findPeaks(clean, dt)
+  const { peaks, ibis } = findPeaks(clean, dt)
   // Spectral HR estimate
   let hr = estimateHRFromSpectrum(clean, dt)
   // Smooth HR via Kalman
@@ -121,7 +123,15 @@ function process() {
   const hrv = computeHRVMetrics(ibis, clean, dt)
   const snrCombined = snrPulse(clean, dt)
   const confidence = updateConfidence(hr, snrCombined)
-  return { hr, hrv, confidence, signal: clean, sqi: { snr: snrCombined, rois: { forehead: snrF, leftCheek: snrL, rightCheek: snrR } } }
+  // SQI extras
+  const ac = autocorrStrength(clean, dt)
+  const reg = beatRegularity(ibis)
+  const score = sqiScore({ snrDb: snrCombined, ac, reg })
+  // Beat event if a new peak detected at the tail
+  const peakCount = peaks.length
+  const beat = peakCount > lastPeakCount
+  lastPeakCount = peakCount
+  return { hr, hrv, confidence, signal: clean, sqi: { snr: snrCombined, ac, regularity: reg, score, rois: { forehead: snrF, leftCheek: snrL, rightCheek: snrR } }, beat }
 }
 
 // Removed unused combineRGB; CHROM/POS are handled in utilities and can be integrated later
@@ -153,7 +163,12 @@ onmessage = (ev: MessageEvent<FrameMsg | ControlMsg>) => {
   timestamps.push(msg.ts)
   const res = process()
   if (res) {
-    postMessage({ type: 'update', ...res })
+    // Send update
+    postMessage({ type: 'update', hr: res.hr, hrv: res.hrv, confidence: res.confidence, signal: res.signal, sqi: res.sqi })
+    // Beat haptic trigger
+    if ((res as any).beat) {
+      postMessage({ type: 'beat' })
+    }
     // Send a short denoised waveform window for AR overlay
     const wfLen = Math.min(128, res.signal.length)
     if (wfLen > 0) {

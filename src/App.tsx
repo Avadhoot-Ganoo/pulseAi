@@ -17,6 +17,7 @@ import ThreeOverlay from './components/ThreeOverlay'
 import PerfStats from './components/PerfStats'
 import OverlayPPG from './components/OverlayPPG'
 import OverlayResults from './components/OverlayResults'
+import QualityHUD from './components/QualityHUD'
 
 type Phase = 'idle' | 'measuring' | 'done'
 
@@ -24,9 +25,10 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [privacyOpen, setPrivacyOpen] = useState(false)
   const [telemetryEnabled, setTelemetryEnabled] = useState(false)
+  const [streak, setStreak] = useState(0)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const { start: startTimer, secondsLeft, reset: resetTimer } = useTimer(30)
-  const { landmarks, faceBox, stability } = useFaceMesh({ videoRef })
+  const { landmarks, faceBox, stability, rois, motionOK } = useFaceMesh({ videoRef })
   const {
     startMeasurement,
     stopMeasurement,
@@ -37,7 +39,8 @@ export default function App() {
     metrics,
     sqi,
     perfStats,
-  } = useRPPG({ videoRef, landmarks })
+    waveform,
+  } = useRPPG({ videoRef, landmarks, rois, motionOK })
   const { applyOffsets } = useCalibration()
 
   const onStart = async () => {
@@ -52,6 +55,15 @@ export default function App() {
       setPhase('done')
     }
   }, [phase, secondsLeft, stopMeasurement])
+
+  useEffect(() => {
+    if (phase !== 'measuring') {
+      setStreak(0)
+      return
+    }
+    const good = motionOK && (sqi?.score ?? ((sqi?.snr || 0) > 6 ? 0.7 : 0.4)) >= 0.6
+    setStreak((s) => (good ? Math.min(100, s + 1) : 0))
+  }, [phase, sqi, motionOK])
 
   const onRetake = () => {
     resetTimer()
@@ -85,6 +97,7 @@ export default function App() {
                   progress={(30 - secondsLeft) / 30}
                   waveform={waveform}
                 />
+                <QualityHUD stability={stability} sqi={sqi} streak={streak} motionOK={motionOK} />
                 <div className="absolute top-4 left-4">
                   <StabilityMeter value={Math.round(stability * 100)} />
                 </div>
