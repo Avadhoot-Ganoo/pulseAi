@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0b1020;
+  --glass: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.12);
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: linear-gradient(180deg, #0b1020 0%, #0f1530 100%);
+  color: #e8ecf8;
+}
+
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+}
+
+.neon-text {
+  text-shadow: 0 0 12px rgba(155, 107, 255, 0.5);
+}
+
+.card-gradient {
+  background-image: radial-gradient(600px 300px at 10% 10%, rgba(106, 198, 255, 0.12) 0%, transparent 40%),
+    radial-gradient(500px 250px at 90% 10%, rgba(155, 107, 255, 0.16) 0%, transparent 50%);
+}

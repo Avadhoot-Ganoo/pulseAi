@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: pulsear
+        run: npm ci
+
+      - name: Lint
+        working-directory: pulsear
+        run: npm run lint
+
+      - name: Build
+        working-directory: pulsear
+        run: npm run build
+
+      - name: Unit tests (Vitest)
+        working-directory: pulsear
+        run: npm run test
+
+      - name: Start preview server
+        working-directory: pulsear
+        run: nohup npm run preview -- --port 4173 --host > /dev/null 2>&1 &
+
+      - name: Wait for preview
+        working-directory: pulsear
+        run: npx wait-on http://localhost:4173/
+
+      - name: E2E tests (Puppeteer)
+        working-directory: pulsear
+        run: npm run e2e
