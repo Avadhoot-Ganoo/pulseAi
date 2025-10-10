@@ -14,7 +14,7 @@ type AnyMsg = InitMsg | InferSpo2Msg | InferBpMsg | DenoiseMsg
 async function ensureModels() {
   if (!spo2Session) {
     try {
-      const modelUrl = new URL('/models/spo2_model.onnx', import.meta.url).toString()
+      const modelUrl = new URL('/models/spo2_model.onnx?v=1', import.meta.url).toString()
       console.log('loading model', modelUrl)
       spo2Session = await ort.InferenceSession.create(modelUrl, { executionProviders: ['webgpu', 'webgl', 'wasm'] })
     } catch (e) {
@@ -25,7 +25,7 @@ async function ensureModels() {
   }
   if (!bpSession) {
     try {
-      const modelUrl = new URL('/models/bp_model.onnx', import.meta.url).toString()
+      const modelUrl = new URL('/models/bp_model.onnx?v=1', import.meta.url).toString()
       console.log('loading model', modelUrl)
       bpSession = await ort.InferenceSession.create(modelUrl, { executionProviders: ['webgpu', 'webgl', 'wasm'] })
     } catch (e) {
@@ -36,7 +36,7 @@ async function ensureModels() {
   }
   if (!denoiseSession) {
     try {
-      const modelUrl = new URL('/models/denoiser.onnx', import.meta.url).toString()
+      const modelUrl = new URL('/models/denoiser.onnx?v=1', import.meta.url).toString()
       console.log('loading model', modelUrl)
       denoiseSession = await ort.InferenceSession.create(modelUrl, { executionProviders: ['webgpu', 'webgl', 'wasm'] })
     } catch (e) {

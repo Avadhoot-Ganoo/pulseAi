@@ -36,3 +36,9 @@ jobs:
 
       - name: E2E Tests
         run: npm run -s e2e || echo "No e2e tests"
+
+      - name: Headless Smoke Test (deployed)
+        if: ${{ secrets.SMOKE_URL }}
+        env:
+          SMOKE_URL: ${{ secrets.SMOKE_URL }}
+        run: npm run -s smoke

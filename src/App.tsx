@@ -71,6 +71,26 @@ export default function App() {
     setPhase('idle')
   }
 
+  // Persistent debug box: shows HR and SQI to prove processing
+  useEffect(() => {
+    const dbgId = 'dbg'
+    let dbg = document.getElementById(dbgId)
+    if (!dbg) {
+      dbg = document.createElement('div')
+      dbg.id = dbgId
+      dbg.style.cssText = 'position:fixed;left:8px;top:8px;z-index:99999;background:#0008;color:#fff;padding:8px;border-radius:8px;font:12px/1.4 system-ui'
+      document.body.appendChild(dbg)
+    }
+    const iv = setInterval(() => {
+      const hrVal = applyOffsets(hr).hr
+      const sqiVal = sqi?.score ?? (sqi ? Math.max(0, Math.min(1, 0.5 + (sqi.snr || 0) / 24)) : 0)
+      dbg!.textContent = `hr:${hrVal ? Math.round(hrVal) : '--'} sqi:${sqiVal.toFixed(2)}`
+    }, 250)
+    return () => {
+      clearInterval(iv)
+    }
+  }, [hr, sqi])
+
   return (
     <div className="min-h-screen bg-gradient-futuristic">
       <header className="px-6 py-4 flex items-center justify-between">
