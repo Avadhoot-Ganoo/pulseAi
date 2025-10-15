@@ -24,6 +24,10 @@ export default function useRPPG({
   rois?: ROISet | null
   motionOK?: boolean
 }) {
+  const query = new URLSearchParams(typeof location !== 'undefined' ? location.search : '')
+  const skipModel = query.get('nomodel') === '1'
+  const mixParam = (query.get('mix') || '').toLowerCase()
+  const mixMode: 'green' | 'chrom' | 'pos' = mixParam === 'chrom' ? 'chrom' : mixParam === 'pos' ? 'pos' : 'green'
   const workerRef = useRef<Worker | null>(null)
   const modelWorkerRef = useRef<Worker | null>(null)
   const telemetryWorkerRef = useRef<Worker | null>(null)
@@ -41,6 +45,7 @@ export default function useRPPG({
   const [waveform, setWaveform] = useState<Float32Array | null>(null)
   const prevROIs = useRef<{ forehead: { x: number; y: number; w: number; h: number }; leftCheek: { x: number; y: number; w: number; h: number }; rightCheek: { x: number; y: number; w: number; h: number } } | null>(null)
   const [modelError, setModelError] = useState<string | null>(null)
+  const frameCounterRef = useRef<number>(0)
 
   useEffect(() => {
     // create an offscreen canvas
@@ -55,26 +60,33 @@ export default function useRPPG({
     ;(window as any).__rppgWorker = worker
     console.log('spawned rppg worker')
 
-    // Lazy model worker
-    const mWorker = new Worker(new URL('../workers/modelWorker.ts', import.meta.url), { type: 'module' })
-    modelWorkerRef.current = mWorker
-    mWorker.postMessage({ type: 'init' })
+    // Lazy model worker (skip when nomodel=1)
+    let mWorker: Worker | null = null
+    if (!skipModel) {
+      mWorker = new Worker(new URL('../workers/modelWorker.ts', import.meta.url), { type: 'module' })
+      modelWorkerRef.current = mWorker
+      mWorker.postMessage({ type: 'init' })
+    } else {
+      setModelError('model inference skipped (nomodel=1)')
+    }
 
-    mWorker.onmessage = (ev) => {
-      const data = ev.data
-      console.log('worker->main modelWorker', data)
-      if (data.type === 'model_error') {
-        console.error('Model failed to load — check console/network', data)
-        setModelError(`${data.model}: ${data.error}`)
-      }
-      if (data.type === 'spo2' && data.value !== null) {
-        setMetrics((prev) => ({ ...prev, spo2: data.value }))
-      }
-      if (data.type === 'bp' && data.value !== null) {
-        setMetrics((prev) => ({ ...prev, bp: data.value }))
-      }
-      if (data.type === 'denoised' && data.data instanceof Float32Array) {
-        setWaveform(data.data)
+    if (mWorker) {
+      mWorker.onmessage = (ev) => {
+        const data = ev.data
+        console.log('worker->main modelWorker', data)
+        if (data.type === 'model_error') {
+          console.error('Model failed to load — check console/network', data)
+          setModelError(`${data.model}: ${data.error}`)
+        }
+        if (data.type === 'spo2' && data.value !== null) {
+          setMetrics((prev) => ({ ...prev, spo2: data.value }))
+        }
+        if (data.type === 'bp' && data.value !== null) {
+          setMetrics((prev) => ({ ...prev, bp: data.value }))
+        }
+        if (data.type === 'denoised' && data.data instanceof Float32Array) {
+          setWaveform(data.data)
+        }
       }
     }
 
@@ -91,9 +103,13 @@ export default function useRPPG({
       }
       if (data.type === 'waveform' && data.data instanceof Float32Array) {
         // send to denoiser if available; falls back to echo in worker
-        try {
-          modelWorkerRef.current?.postMessage({ type: 'denoise', data: data.data }, [data.data.buffer])
-        } catch {
+        if (!skipModel) {
+          try {
+            modelWorkerRef.current?.postMessage({ type: 'denoise', data: data.data }, [data.data.buffer])
+          } catch {
+            setWaveform(data.data)
+          }
+        } else {
           setWaveform(data.data)
         }
       }
@@ -114,14 +130,13 @@ export default function useRPPG({
 
     return () => {
       worker.terminate()
-      mWorker.terminate()
+      mWorker?.terminate()
       telemetryWorkerRef.current?.terminate()
     }
   }, [])
 
   const computeROIs = useCallback(() => {
     const video = videoRef.current
-    const demo = new URLSearchParams(window.location.search).get('demo') === '1'
     if (!video) return null
 
     // If stabilized ROIs are provided from face worker, prefer them
@@ -130,8 +145,8 @@ export default function useRPPG({
       return roisArg
     }
 
-    // Demo mode: fixed ROIs when landmarks are unavailable
-    if (!landmarks && demo) {
+    // Fallback ROIs when landmarks are unavailable (offline-first)
+    if (!landmarks) {
       const vw = video.videoWidth
       const vh = video.videoHeight
       const forehead = {
@@ -175,66 +190,130 @@ export default function useRPPG({
       if (!video || !canvas) return [0, 0, 0]
       const ctx = canvas.getContext('2d')
       if (!ctx) return [0, 0, 0]
-      // Ensure canvas matches current video dimensions to align ROI coordinates
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-          canvas.width = video.videoWidth
-          canvas.height = video.videoHeight
-        }
+      // Draw only ROI sub-rect to a small canvas to reduce memory bandwidth
+      if (canvas.width !== rect.w || canvas.height !== rect.h) {
+        canvas.width = Math.max(8, rect.w)
+        canvas.height = Math.max(8, rect.h)
       }
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-      const img = ctx.getImageData(rect.x, rect.y, rect.w, rect.h)
+      ctx.drawImage(
+        video,
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        0,
+        0,
+        rect.w,
+        rect.h,
+      )
+      const img = ctx.getImageData(0, 0, rect.w, rect.h)
       const data = img.data
-      let r = 0,
-        g = 0,
-        b = 0
-      const pixels = rect.w * rect.h
+      let rSum = 0,
+        gSum = 0,
+        bSum = 0,
+        count = 0
+      // Robust gating: exclude saturated/too-dark pixels AND non-skin chroma using YCbCr bounds.
+      // Y approximates luminance; Cb/Cr thresholds capture a broad skin cluster.
+      const low = 10, high = 245
       for (let i = 0; i < data.length; i += 4) {
-        r += data[i]
-        g += data[i + 1]
-        b += data[i + 2]
+        const r = data[i]
+        const g = data[i + 1]
+        const b = data[i + 2]
+        const Y = 0.299 * r + 0.587 * g + 0.114 * b
+        if (Y <= low || Y >= high) continue
+        const Cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b
+        const Cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b
+        // Broad skin cluster (tuned to be permissive for varied tones)
+        if (Cb < 77 || Cb > 127) continue
+        if (Cr < 133 || Cr > 173) continue
+        rSum += r
+        gSum += g
+        bSum += b
+        count += 1
       }
-      return [r / pixels, g / pixels, b / pixels]
+      const denom = Math.max(1, count)
+      return [rSum / denom, gSum / denom, bSum / denom]
     },
     [videoRef]
   )
 
   const loop = useCallback(() => {
-    if (!running) return
-    const now = performance.now()
-    if (lastFrameTs.current !== null) {
-      const dt = now - lastFrameTs.current
-      telemetryWorkerRef.current?.postMessage({ type: 'perf', name: 'frame', dt })
+    const video = videoRef.current
+    if (!running || !video) return
+    const hasRVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype
+    const tickRAF = () => {
+      const now = performance.now()
+      if (lastFrameTs.current !== null) {
+        const dt = now - lastFrameTs.current
+        telemetryWorkerRef.current?.postMessage({ type: 'perf', name: 'frame', dt })
+      }
+      lastFrameTs.current = now
+      if (motionOK === false) {
+        telemetryWorkerRef.current?.postMessage({ type: 'perf', name: 'frame_drop', dt: 0 })
+        requestAnimationFrame(tickRAF)
+        return
+      }
+      const rois = computeROIs()
+      if (rois) {
+        const f = sampleROI(rois.forehead)
+        const l = sampleROI(rois.leftCheek)
+        const r = sampleROI(rois.rightCheek)
+        lastRGB.current = { forehead: f, leftCheek: l, rightCheek: r }
+        frameCounterRef.current += 1
+        workerRef.current?.postMessage({
+          type: 'frame',
+          ts: performance.now(),
+          frameId: frameCounterRef.current,
+          forehead: f,
+          leftCheek: l,
+          rightCheek: r,
+        })
+      }
+      requestAnimationFrame(tickRAF)
     }
-    lastFrameTs.current = now
-    if (motionOK === false) {
-      // skip sampling when motion exceeds threshold
-      telemetryWorkerRef.current?.postMessage({ type: 'perf', name: 'frame_drop', dt: 0 })
-      requestAnimationFrame(loop)
-      return
-    }
-    const rois = computeROIs()
-    if (rois) {
-      const f = sampleROI(rois.forehead)
-      const l = sampleROI(rois.leftCheek)
-      const r = sampleROI(rois.rightCheek)
-      lastRGB.current = { forehead: f, leftCheek: l, rightCheek: r }
-      workerRef.current?.postMessage({
-        type: 'frame',
-        ts: performance.now(),
-        forehead: f,
-        leftCheek: l,
-        rightCheek: r,
+    if (hasRVFC) {
+      ;(video as any).requestVideoFrameCallback(function cb(_now: number, _metadata: any) {
+        const now = performance.now()
+        if (lastFrameTs.current !== null) {
+          const dt = now - lastFrameTs.current
+          telemetryWorkerRef.current?.postMessage({ type: 'perf', name: 'frame', dt })
+        }
+        lastFrameTs.current = now
+        if (motionOK !== false) {
+          const rois = computeROIs()
+          if (rois) {
+            const f = sampleROI(rois.forehead)
+            const l = sampleROI(rois.leftCheek)
+            const r = sampleROI(rois.rightCheek)
+            lastRGB.current = { forehead: f, leftCheek: l, rightCheek: r }
+            frameCounterRef.current += 1
+            workerRef.current?.postMessage({
+              type: 'frame',
+              ts: performance.now(),
+              frameId: frameCounterRef.current,
+              forehead: f,
+              leftCheek: l,
+              rightCheek: r,
+            })
+          }
+        } else {
+          telemetryWorkerRef.current?.postMessage({ type: 'perf', name: 'frame_drop', dt: 0 })
+        }
+        ;(video as any).requestVideoFrameCallback(cb)
       })
+    } else {
+      requestAnimationFrame(tickRAF)
     }
-    requestAnimationFrame(loop)
   }, [computeROIs, sampleROI, running, motionOK])
 
   const startMeasurement = useCallback(() => {
     if (running) return
     setRunning(true)
-    loadModels().catch(() => {})
-    workerRef.current?.postMessage({ type: 'start' })
+    loadModels().catch((e) => {
+      const msg = e instanceof Error ? e.message : String(e)
+      setModelError(msg)
+    })
+    workerRef.current?.postMessage({ type: 'start', mix: mixMode })
     console.log('worker-ready', !!workerRef.current)
     requestAnimationFrame(loop)
   }, [loop, running])
@@ -259,9 +338,10 @@ export default function useRPPG({
         return inferBP([h, s]).then((bp) => setMetrics((prev) => ({ ...prev, bp })))
       })
       .catch(() => {
-        // heuristics applied in models.ts; already handled
+        // If real model inference fails, surface error for diagnostics overlay
+        setModelError('model inference failed — check model files and names')
       })
-    console.log('final result', { hr, hrv, metrics })
+    console.log('final_result', { hr, hrv, metrics })
   }, [])
 
   return {

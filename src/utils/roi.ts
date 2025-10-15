@@ -67,11 +67,26 @@ export function clampROIs(rois: { forehead: ROI; leftCheek: ROI; rightCheek: ROI
 
 export function stabilizeROI(prev: ROI | null, next: ROI, alpha = 0.6): ROI {
   if (!prev) return next
-  const lerp = (a: number, b: number) => alpha * a + (1 - alpha) * b
+  // Adapt smoothing based on motion magnitude: stronger smoothing when jitter is small,
+  // lighter smoothing when displacement is large so ROI can follow face quickly.
+  const cxPrev = prev.x + prev.w * 0.5
+  const cyPrev = prev.y + prev.h * 0.5
+  const cxNext = next.x + next.w * 0.5
+  const cyNext = next.y + next.h * 0.5
+  const disp = Math.hypot(cxNext - cxPrev, cyNext - cyPrev)
+  const scale = Math.max(next.w, next.h)
+  const norm = Math.max(0, Math.min(1, scale > 0 ? disp / (scale * 0.25) : 0))
+  const aEff = Math.max(0.5, Math.min(0.9, alpha - 0.2 * (1 - norm)))
+  const lerp = (a: number, b: number) => aEff * a + (1 - aEff) * b
   return {
     x: lerp(prev.x, next.x),
     y: lerp(prev.y, next.y),
     w: lerp(prev.w, next.w),
     h: lerp(prev.h, next.h),
   }
+}
+
+// Optional helper for callers that want explicit adaptive stabilization without providing alpha
+export function stabilizeROIAdaptive(prev: ROI | null, next: ROI): ROI {
+  return stabilizeROI(prev, next, 0.7)
 }

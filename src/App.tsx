@@ -18,6 +18,7 @@ import PerfStats from './components/PerfStats'
 import OverlayPPG from './components/OverlayPPG'
 import OverlayResults from './components/OverlayResults'
 import QualityHUD from './components/QualityHUD'
+import DiagnosticsOverlay from './components/DiagnosticsOverlay'
 
 type Phase = 'idle' | 'measuring' | 'done'
 
@@ -26,6 +27,8 @@ export default function App() {
   const [privacyOpen, setPrivacyOpen] = useState(false)
   const [telemetryEnabled, setTelemetryEnabled] = useState(false)
   const [streak, setStreak] = useState(0)
+  const [cameraError, setCameraError] = useState<string | null>(null)
+  const showDiag = new URLSearchParams(location.search).get('diag') === '1'
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const { start: startTimer, secondsLeft, reset: resetTimer } = useTimer(30)
   const { landmarks, faceBox, stability, rois, motionOK } = useFaceMesh({ videoRef })
@@ -93,91 +96,62 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gradient-futuristic">
-      <header className="px-6 py-4 flex items-center justify-between">
-        <div className="text-xl font-semibold neon-text">PulseAR</div>
-        <div className="flex items-center gap-3">
-          <button className="text-xs opacity-70 underline" onClick={() => setPrivacyOpen(true)}>Privacy</button>
-          <div className="text-xs opacity-70">Not a medical device — wellness only</div>
-        </div>
-      </header>
-
-      <main className="px-6 pb-16">
+      <main className="px-6 pb-24">
         <div className="max-w-4xl mx-auto glass rounded-2xl p-4">
           <div className="relative rounded-xl overflow-hidden">
-            <CameraFeed ref={videoRef} active={phase !== 'idle'} />
+            <CameraFeed ref={videoRef} active={phase !== 'idle'} onError={(m) => setCameraError(m)} />
             {modelError && (
               <div className="absolute top-2 left-2 z-[9999] bg-red-600/80 text-white text-xs px-3 py-2 rounded">
                 Model failed to load — check console/network: {modelError}
               </div>
             )}
-
-            {phase === 'measuring' && (
-              <>
-                <OverlayPulseRing faceBox={faceBox} hr={applyOffsets(hr).hr} />
-                <ThreeOverlay hr={applyOffsets(hr).hr} />
-                <OverlayPPG
-                  landmarks={landmarks}
-                  liveHR={applyOffsets(hr).hr}
-                  liveAmp={Math.min(1, Math.abs(signal[signal.length - 1] || 0))}
-                  sqi={sqi ? Math.max(0, Math.min(1, (sqi.snr || 0) / 20)) : 0.5}
-                  progress={(30 - secondsLeft) / 30}
-                  waveform={waveform}
-                />
-                <QualityHUD stability={stability} sqi={sqi} streak={streak} motionOK={motionOK} />
-                <div className="absolute top-4 left-4">
-                  <StabilityMeter value={Math.round(stability * 100)} />
-                </div>
-                <div className="absolute top-4 right-4">
-                  <ProgressCircle total={30} value={30 - secondsLeft} />
-                </div>
-                <div className="absolute bottom-4 left-4">
-                  {sqi && <QualityMeter snrDb={sqi.snr} />}
-                </div>
-                <div className="absolute bottom-4 right-4">
-                  <PerfStats stats={perfStats} />
-                </div>
-                {/* Debug text to ensure overlay updates render */}
-                <div className="absolute bottom-2 left-2 text-white/80 text-xs z-[9999]">Overlay active</div>
-              </>
+            {cameraError && (
+              <div className="absolute top-2 right-2 z-[9999] bg-red-600/80 text-white text-xs px-3 py-2 rounded">
+                Camera error — {cameraError}. Ensure HTTPS and allow camera permission.
+              </div>
             )}
+            {(showDiag || cameraError) && <DiagnosticsOverlay cameraError={cameraError} />}
+
+            {/* Always render AR overlay area; it will fall back to center if no landmarks */}
+            <OverlayPPG
+              landmarks={landmarks}
+              liveHR={applyOffsets(hr).hr}
+              liveAmp={Math.min(1, Math.abs(signal[signal.length - 1] || 0))}
+              sqi={sqi || 0.5}
+              progress={phase === 'measuring' ? (30 - secondsLeft) / 30 : 0}
+              waveform={waveform}
+              hrv={hrv}
+              metrics={metrics}
+            />
+
+            {/* Single control button: Start/Stop + Privacy link */}
+            <div className="absolute bottom-4 left-0 right-0 flex justify-center z-[99999]">
+              <button
+                className="px-6 py-3 rounded-full bg-purple-600 hover:bg-purple-500 shadow-glow flex items-center gap-3"
+                onClick={() => {
+                  if (phase !== 'measuring') {
+                    onStart()
+                  } else {
+                    stopMeasurement()
+                    setPhase('done')
+                  }
+                }}
+              >
+                <span>{phase !== 'measuring' ? 'Start Scan' : 'Stop Scan'}</span>
+                <span className="text-xs opacity-80">(Tap = consent; local-only)</span>
+                <span
+                  className="text-xs underline opacity-80"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setPrivacyOpen(true)
+                  }}
+                >
+                  Privacy
+                </span>
+              </button>
+            </div>
           </div>
         </div>
-
-        <AnimatePresence initial={false}>
-          {phase === 'idle' && <Onboarding onStart={onStart} />}
-
-          {phase === 'done' && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="max-w-4xl mx-auto mt-8"
-            >
-              {/* Show results on the overlay near the face */}
-              <div className="relative rounded-xl overflow-hidden">
-                <CameraFeed ref={videoRef} active={true} />
-                <OverlayResults
-                  landmarks={landmarks}
-                  hr={applyOffsets(hr, metrics.spo2, metrics.bp).hr}
-                  spo2={applyOffsets(hr, metrics.spo2, metrics.bp).spo2}
-                  bp={applyOffsets(hr, metrics.spo2, metrics.bp).bp}
-                  confidence={confidence}
-                />
-              </div>
-              <ResultDashboard
-                hr={applyOffsets(hr, metrics.spo2, metrics.bp).hr}
-                hrv={hrv}
-                metrics={{
-                  spo2: applyOffsets(hr, metrics.spo2, metrics.bp).spo2,
-                  bp: applyOffsets(hr, metrics.spo2, metrics.bp).bp,
-                }}
-                confidence={confidence}
-                signal={signal}
-                onRetake={onRetake}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
       </main>
       <PrivacyModal
         open={privacyOpen}

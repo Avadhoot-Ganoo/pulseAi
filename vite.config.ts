@@ -7,12 +7,12 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
-    allowedHosts: ['xopuxw-ip-114-143-75-118.tunnelmole.net'],
+    allowedHosts: true,
   },
   preview: {
     host: true,
     port: 4173,
-    allowedHosts: ['xopuxw-ip-114-143-75-118.tunnelmole.net'],
+    allowedHosts: true,
   },
   optimizeDeps: {
     exclude: ['@mediapipe/face_mesh'],

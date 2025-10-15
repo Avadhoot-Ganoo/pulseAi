@@ -23,21 +23,39 @@ export default function useFaceMesh({
     let landmarker: FaceLandmarker | null = null
     const video = videoRef.current
     if (!video) return
-    const demo = new URLSearchParams(window.location.search).get('demo') === '1'
+    const qs = new URLSearchParams(window.location.search)
+    const demo = qs.get('demo') === '1'
+    const skipMP = qs.get('nomp') === '1'
 
     ;(async () => {
-      if (demo) {
+      if (demo || skipMP) {
         // Skip face landmarking in demo mode; rPPG uses ROI fallback
         return
       }
+      // Preflight: only initialize MediaPipe if local assets exist to avoid ERR_ABORTED
+      const assetExists = async (path: string) => {
+        try {
+          const res = await fetch(path, { method: 'HEAD', cache: 'no-store' })
+          return res.ok
+        } catch {
+          return false
+        }
+      }
+      const wasmJsPath = '/mediapipe/wasm/vision_wasm_internal.js'
+      const modelPath = '/mediapipe/models/face_landmarker.task'
+      const hasWasm = await assetExists(wasmJsPath)
+      const hasModel = await assetExists(modelPath)
+      if (!hasWasm || !hasModel) {
+        console.warn('MediaPipe assets missing; skipping FaceLandmarker. Using ROI fallback.')
+        return
+      }
       try {
-        const fileset = await FilesetResolver.forVisionTasks(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
-        )
+        // Offline-first: attempt to load WASM assets from local public path
+        const fileset = await FilesetResolver.forVisionTasks('/mediapipe/wasm')
         landmarker = await FaceLandmarker.createFromOptions(fileset, {
           baseOptions: {
-            modelAssetPath:
-              'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+            // Offline-first: use local model if available; if not, fallback ROI logic handles measurement
+            modelAssetPath: '/mediapipe/models/face_landmarker.task',
           },
           runningMode: 'VIDEO',
           numFaces: 1,
